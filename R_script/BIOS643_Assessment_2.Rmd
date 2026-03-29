@@ -155,6 +155,11 @@ summary(cohort$age) # minimum age = 33 years
 cohort_40 <- cohort %>%
   filter(age >= 40) # 8 participants excluded for their age of entry
 
+# ensure all dates are date objects
+cohort_40$entry_date <- as.Date(cohort_40$entry_date)
+cohort_40$lost_date <- as.Date(cohort_40$lost_date)
+
+
 # export cleaned dataset
 export(cohort_40, here("BIOS643", "Week_2", "Assessment_2", "cohort_clean.csv"))
 
