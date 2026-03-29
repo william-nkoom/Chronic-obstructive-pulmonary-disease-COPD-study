@@ -339,12 +339,12 @@ export(residential, here("BIOS643", "Week_2", "Assessment_2", "res_clean.csv"))
 **Combined dataset**
 
 * The as.Date() function of the lubridate package was used to ensure all dates are date objects
-* skim() function from the skimr package showed no missing values
 * Duplicated row check showed no duplicated rows
 * The cleaned cohort dataset was first merged with the cleaned residential dataset using id and entry dates as key
 * The resulting dataset was then merged with the cleaned icd dataset using id as key
 * The variables were then rearranged using the select() function in a logical order
 * Some variable names were cleaned and standardized
+* skim() function from the skimr package showed that there are a total of 90 missing values from the following variables: addr_start_date, addr_end_date and lag_years.
 * The final cleaned and merged dataset was exported for sharing and further analysis.
 
 ```{r include = FALSE}
@@ -398,10 +398,17 @@ cohort_res_icd <- cohort_res_icd %>%
     )
 names(cohort_res_icd) # check
 
+```
+
+
+```{r include = FALSE}
+skim(cohort_res_icd)
+
 # export final cleaned and merged dataset
 export(cohort_res_icd, here("BIOS643", "Week_2", "Assessment_2", "cohort_res_icd.csv"))
 
 ```
+
 
 \newpage
 
