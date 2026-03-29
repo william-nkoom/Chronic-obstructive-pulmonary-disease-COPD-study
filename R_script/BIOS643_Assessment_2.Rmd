@@ -1,0 +1,484 @@
+---
+title: "BIOS 643 - Health Data Analysis: Thry to Prac - Analysis & Rptg"
+author: "William Opoku-Nkoom"
+subtitle: Assessment Week 2
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+header-includes:
+- \usepackage{titling}
+- \pretitle{\begin{center} \includegraphics{McG_DEPT EPIDEM BIOSTAT OCCUPAT HEALTH_rgb_red_hor_en.jpg}\LARGE\\}
+- \posttitle{\end{center}}
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+
+```{r echo = FALSE}
+# load relevant packages
+pacman::p_load(rio,
+               here,
+               ggplot2,
+               dplyr,
+               tidyverse,
+               skimr,
+               lubridate,
+               janitor
+               )
+
+```
+
+
+```{r include = FALSE}
+# load cohort dataset 
+cohort <- import(here("BIOS643", "Week_2", "Assessment_2", "cohort-data.csv"))
+
+# data overview
+head(cohort)
+tail(cohort)
+skim(cohort) 
+str(cohort)
+names(cohort)
+```
+
+# Data Cleaning Plan
+
+**Cohort Dataset**
+
+*Issues found from data overview and how corrected*
+
+ * The variables entry date and lost to follow-up date had some values that could not be recognized as dates.
+   * The parse_date_time() function of the lubridate package was used to identify and validate all date formats.
+   * The original entry date and lost to follow-up variables were then dropped after creating new variables using the parse_date_time() function of the lubridate package.
+* Column names were inconsistent with a mix of lower and upper cases with no structured format
+  * The dplyr package was used to rename specific columns
+  * The janitor package was used to standardize variable names
+  * Columns were finally logically arranged with the select() function
+* Duplicated row check
+  * Three (3) duplicated rows found; specifically id: 38, 1782 and 1744
+  * These were then removed to have distinct rows
+* The skim() function from the skimr package showed no missing values
+* The variables id, age, sex, bmi are numeric from the skim() function of the skimr package
+  * sex was therefore recoded as factor
+* Smoking status was not accurately labelled (mix of upper and lower cases)
+  * Mutated to have unique labels and recoded as a factor
+* Body mass index (bmi) was categorised into underweight, normal, overweight and obese and then orderd as a factor variable
+* Socio-economic status (ses_status) was also ordered as as factor variable
+* Application of the minimum age at entry excluded 8 participants from the cohort.
+* The cleaned cohort dataset was then exported for sharing and future analysis.
+
+```{r echo = FALSE, warning = FALSE}
+# filter rows with entry dates and loss to follow-up dates
+cohort$entry_date_parsed <- parse_date_time(
+  cohort$entrydate, 
+  orders = c("ymd", "dmy", "mdy", "Ymd", "dmY", "mdY")
+  )
+
+cohort$date_loss_parsed <- parse_date_time(
+  cohort$DATE_losstofollowup, 
+  orders = c("ymd", "dmy", "mdy", "Ymd", "dmY", "mdY")
+  )
+
+cohort <- cohort %>%
+  filter(!is.na(entry_date_parsed)) # drops NA dates
+
+# drop original entry date and lost to follow-up variables
+cohort <- cohort %>%
+  select(-entrydate, -DATE_losstofollowup)
+
+# clean column names
+cohort <- cohort %>%
+  rename(
+    entry_date = entry_date_parsed,
+    sex = `SEX (1=MALE)`,
+    ses_status = socioeconomic_status,
+    smoking_status = SMOKE,
+    lost_date = date_loss_parsed
+  )
+
+cohort <- clean_names(cohort) # standardize column names
+
+# recode sex as a factor
+cohort$sex <- factor(cohort$sex, levels = c(0, 1),
+                     labels = c("Female", "Male"))
+
+# standardize smoking_status levels then recode as factor
+cohort$smoking_status <- tolower(cohort$smoking_status)
+cohort$smoking_status <- factor(
+  tools::toTitleCase(cohort$smoking_status),
+  levels = c("Never", "Former", "Current")
+)
+table(cohort$smoking_status) # check
+
+# categorise bmi
+cohort <- cohort %>%
+  mutate(bmi_cat = case_when(
+    bmi < 18.5 ~ "Underweight",
+    bmi < 25 ~ "Normal",
+    bmi < 30 ~ "Overweight",
+    TRUE ~ "Obese"
+  )
+  )
+table(cohort$bmi_cat) # check
+
+cohort$bmi_cat <- factor(
+  cohort$bmi_cat, levels = c(
+    "Underweight", "Normal", "Overweight", "Obese"
+  )
+) # ordered factor for bmi_cat
+
+cohort$ses_status <- factor(
+  cohort$ses_status, levels = c(
+    "Low", "Medium", "High"
+  )
+) # ordered factor for ses_status
+
+table(cohort$ses_status) # check
+
+# arrange columns
+cohort <- cohort %>%
+  select(id, entry_date, age, sex, bmi, bmi_cat, ses_status, smoking_status, lost_date)
+
+# check for duplicate rows
+any(duplicated(cohort)) # True
+sum(duplicated(cohort)) # 3 duplicated rows present
+cohort[duplicated(cohort$id), ] # ids: 38, 1782, 1744 duplicated
+cohort <- cohort[!duplicated(cohort$id), ] # remove duplicated rows
+
+# application of exclusion criterion of 40 years minimum age in cohort
+summary(cohort$age) # minimum age = 33 years
+cohort_40 <- cohort %>%
+  filter(age >= 40) # 8 participants excluded for their age of entry
+
+# export cleaned dataset
+export(cohort_40, here("BIOS643", "Week_2", "Assessment_2", "cohort_clean.csv"))
+
+
+```
+
+\newpage
+
+**icd dataset**
+
+*Issues found from data overview and how corrected*
+
+* The variable "description" was renamed to icd_description
+* Duplicated row check showed no duplicated rows
+* skim() function from the skimr package showed no missing values
+* Multiple diagnostic dates (icd_date) for the same person (id) for the same disease(icd_code):
+  * slice_min() function of the dplyr package was used to only retain the first diagnosis. 
+* COPD outcome indicator was created using the mutate() function and recoded as a factor, where 0 means copd absent (No) and 1 means copd present (Yes)
+* A copd comorbidy indicator was also defined using the summary() function.
+  * The comorbidity variable was recoded as a factor where 0 means absence of comorbidity (No) and 1 means the presence of comorbidity (Yes)
+  * This mini dataset was then merged to the original to have a composite icd dataset.
+* The cleaned icd dataset was then exported for sharing and future analysis
+
+```{r include = FALSE}
+# load icd dataset
+icd <- import(here("BIOS643", "Week_2", "Assessment_2", "icd-data.csv"))
+
+# data overview
+head(icd)
+tail(icd)
+skim(icd) 
+str(icd)
+names(icd)
+
+table(icd$description) # verify the various icd descriptions
+
+```
+
+
+
+```{r echo = FALSE}
+
+icd <- icd %>%
+  rename(
+    icd_description = description # rename description as icd_description
+    )
+# check for duplicates
+any(duplicated(icd)) # False
+
+# keep only first diagnosis per person per disease
+icd <- icd %>%
+  group_by(id, icd_code) %>%
+  slice_min(order_by = icd_date, with_ties = FALSE) %>%
+  ungroup()
+
+# create copd indicator
+copd_pattern <- "^J44.0|^J44.1|^J44.9"
+icd <- icd %>%
+  mutate(
+    copd_outcome = if_else(
+      str_detect(icd_code, copd_pattern),
+      1, 0
+    )
+  )
+
+# recode copd_outcome as a factor
+icd$copd_outcome <- factor(icd$copd_outcome, levels = c(0, 1),
+                     labels = c("No", "Yes"))
+table(icd$copd_outcome) # check
+
+# flag co-morbidity
+comorbidity <- icd %>%
+  mutate(
+    copd_flag = str_detect(icd_code, copd_pattern)
+  ) %>%
+  group_by(id) %>%
+  summarise(
+    copd_comorb = as.integer(
+      any(copd_flag) & n() > 1
+    )
+  )
+table(comorbidity$copd_comorb) # check
+
+# recode copd_comorbidity as a factor
+comorbidity$copd_comorb <- factor(comorbidity$copd_comorb, 
+                                   levels = c(0, 1),
+                     labels = c("No", "Yes"))
+table(comorbidity$copd_comorb) # check
+
+# merge comorbidity to icd dataset
+icd_comob <- left_join(icd, comorbidity, by = "id")
+
+# export cleaned dataset
+export(icd_comob, here("BIOS643", "Week_2", "Assessment_2", "icd_clean.csv"))
+
+
+```
+
+\newpage
+
+
+**residential dataset**
+
+*Issues found from data overview and how corrected*
+
+* skim() function from the skimr package showed no missing values
+* Duplicated row check showed no duplicated rows
+* All dates were ensured they were date objects from the as.Date() function of the lubridate package
+* First residential address dates were grouped by particpant id and then summerised to calculate the number of years between first residential address date and cohort entry date (lag_years)
+* The mini dataset was then merged to the original residential dataset, selecting only id and lag_years variables from the mini dataset
+* Application of a minimum of 10 year lag_date (i.e period between participant's first residential address and cohort entry date) did not exclude any participant, as the minimum number of years found was 10.10 years from summary statistics.
+* Variables were finally arranged in a logical format
+* The cleaned residential dataset was was exported for sharing and future analysis.
+
+```{r include = FALSE}
+# load residential dataset
+residential <- import(here("BIOS643", "Week_2", "Assessment_2", "res-data.csv"))
+
+head(residential)
+tail(residential)
+skim(residential) 
+str(residential)
+names(residential)
+
+```
+
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+
+# check for duplicates
+any(duplicated(residential)) # False
+
+# calculate lag years between address start date and entry date
+
+# ensure all dates are date objects
+residential$address_start_date <- as.Date(residential$address_start_date)
+residential$entry_date <- as.Date(residential$entry_date)
+residential$address_end_date <- as.Date(residential$address_end_date)
+
+# get first address date per participant
+first_address <- residential %>%
+  group_by(id) %>%
+  summarise(
+    first_address = min(address_start_date, na.rm = TRUE),
+    entry_date = first(entry_date) 
+  )
+
+# calculate years between first address and cohort entry date
+first_address <- first_address %>%
+  mutate(
+    lag_years = as.numeric(
+      difftime(entry_date, first_address, units = "days")
+    )/365.25
+  )
+# merge back to original dataset
+residential <- residential %>%
+  left_join(
+    first_address %>%
+      select(id, lag_years),
+    by = "id"
+  )
+names(residential)
+
+# rearrange columns
+residential <- residential %>%
+  select(id, address_start_date, entry_date, lag_years, address_end_date, 
+         county, state)
+summary(residential$lag_years) # min yrs btn first res add & entry date = 10.10 
+
+# export cleaned dataset
+export(residential, here("BIOS643", "Week_2", "Assessment_2", "res_clean.csv"))
+```
+
+\newpage
+
+
+**Combined dataset**
+
+* The as.Date() function of the lubridate package was used to ensure all dates are date objects
+* skim() function from the skimr package showed no missing values
+* Duplicated row check showed no duplicated rows
+* The cleaned cohort dataset was first merged with the cleaned residential dataset using id and entry dates as key
+* The resulting dataset was then merged with the cleaned icd dataset using id as key
+* The variables were then rearranged using the select() function in a logical order
+* Some variable names were cleaned and standardized
+* The final cleaned and merged dataset was exported for sharing and further analysis.
+
+```{r include = FALSE}
+
+# datasets overview 
+dim(cohort)
+dim(icd)
+dim(residential)
+names(cohort)
+names(icd)
+names(residential)
+
+```
+
+
+```{r echo = FALSE, warning = FALSE}
+# ensure all dates are date objects
+cohort$entry_date <- as.Date(cohort$entry_date)
+cohort$lost_date <- as.Date(cohort$lost_date)
+residential$address_start_date <- as.Date(residential$address_start_date)
+residential$entry_date <- as.Date(residential$entry_date)
+residential$address_end_date <- as.Date(residential$address_end_date)
+icd_comob$ehr_entry_date <- as.Date(icd$ehr_entry_date)
+icd_comob$icd_date <- as.Date(icd$icd_date)
+
+# merge cohort and residential datasets
+cohort_res <- left_join(cohort, residential, 
+                            by = c("id", "entry_date"))
+# check for duplicates
+any(duplicated(cohort_res)) # False
+
+# merge cohort_res and icd datasets
+cohort_res_icd <- left_join(cohort_res, icd_comob, 
+                            by = c("id")
+                            )
+# check duplicates
+any(duplicated(cohort_res_icd)) # False
+
+# arrange varriables
+cohort_res_icd <- cohort_res_icd %>%
+  select(id, entry_date, lag_years, age, sex, bmi, bmi_cat, ses_status,
+         smoking_status,lost_date,county, state, address_start_date,
+         address_end_date, ehr_entry_date,icd_code, 
+         icd_description, icd_date, copd_outcome, copd_comorb)
+
+# rename some variables
+cohort_res_icd <- cohort_res_icd %>%
+  rename(
+    addr_start_date = address_start_date,
+    addr_end_date = address_end_date
+    )
+names(cohort_res_icd) # check
+
+# export final cleaned and merged dataset
+export(cohort_res_icd, here("BIOS643", "Week_2", "Assessment_2", "cohort_res_icd.csv"))
+
+```
+
+\newpage
+
+
+**Quality control checks**
+
+1) Analysability
+  * First role has only variables
+  * There is participant id which serves as a unique identifier of participants
+2) Interpretability
+  * All variable names are unique and clearly readable
+  * The longest variable has 16 characters which by far less than the maximum required number of character (32)
+3) Completeness
+  * No missingness
+  * sample size = 1764, which is consistent from the output from the dim() function
+  * Distinct rows (i.e. no duplicated values)
+4) Validity
+  * Date object have been ascertained
+  * Numeric variables are numeric as expected
+  * Categorical variables and factors are as expected
+5) Accuracy
+  * Overview of the data for now shows accuracy
+6) Consistency
+  * Value labeles like dates are uniformly applied, as well as categorical variables.'
+7) De-identification
+  * As it stands now, it is not possible to identify any specific individuals from the dataset.
+
+  
+\newpage
+
+**Data dictionary**
+
+Variable name  |  Data type  |    Values          | Notes                    |
+---------------|-------------|--------------------|--------------------------|
+id             |Numeric      | 1 to inf           |Unique identifier         |
+---------------|-------------|--------------------|--------------------------|
+entry_date     |Date         |YY-MM-DD            |Date of cohort entry      |
+---------------|-------------|--------------------|--------------------------|
+age            |Numeric      |18 and above        |Age of the respondant     |
+---------------|-------------|--------------------|--------------------------|
+sex            |Factor       |0=Female; 1=Male    |Biological sex            |
+---------------|-------------|--------------------|--------------------------|
+bmi            |Numeric      |17 and above        |Body mass index           |
+---------------|-------------|--------------------|--------------------------|
+bmi_cat        |Factor       |Underweight         |bmi < 18.5                |
+---------------|-------------|--------------------|--------------------------|
+.              | .           |Normal              |bmi 18.5 -24.9            |
+---------------|-------------|--------------------|--------------------------|
+.              | .           |Overweight          |bmi 25-29.9               |
+---------------|-------------|--------------------|--------------------------|
+.              | .           |Obese               |bmi > 30.0                |
+---------------|-------------|--------------------|--------------------------|
+ses_status     |Factor       |High/Medium/Low     |Socio-economic status     |
+---------------|-------------|--------------------|--------------------------|
+smoking_status |Factor       |Never/Former/Current|Smoking status            |
+---------------|-------------|--------------------|--------------------------|
+lost_date      |Date         |YY-MM-DD            |Date lost to follow-up    |
+---------------|-------------|--------------------|--------------------------|
+county         |Character    |US counties         |Counties in the US        |
+---------------|-------------|--------------------|--------------------------|
+state          |Character    |US states           |States in the US          |
+---------------|-------------|--------------------|--------------------------|
+addr_start_date|Date         |YY-MM-DD            |Start date of residence   |
+---------------|-------------|--------------------|--------------------------|
+addr_end_date  |Date         |YY-MM-DD            |End date of residence     |
+---------------|-------------|--------------------|--------------------------|
+ehr_entry_date |Date         |YY-MM-DD            |EHR entry date record     |
+---------------|-------------|--------------------|--------------------------|
+icd_code       |Character    |Alphanumeric        |Disease diagnostic codes  |
+---------------|-------------|--------------------|--------------------------|
+icd_description|Character    |-                   |Disease condition         |
+---------------|-------------|--------------------|--------------------------|
+icd_date       |Date         |YY-MM-DD            |Disease diagnosis date    |
+---------------|-------------|--------------------|--------------------------|
+copd_outcome   |Factor       |0=No; 1=Yes         |COPD outcome diagnosis    |
+---------------|-------------|--------------------|--------------------------|
+copd_comorb    |Factor       |0=No; 1=Yes         |COPD comorbidity diagnosis|
+---------------|-------------|--------------------|--------------------------|
+lag_years      |Numeric      |integer             |First residence-entry date|
+
+ 
+
+              
+
+
